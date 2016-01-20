@@ -1,0 +1,102 @@
+Public Key Encryption - Bitcoins
+
+Background
+----------
+
+* Public Key Cryptography
+
+    - encrypt(plaintext, public-encryption-key) -> ciphertext
+    - decrypt(ciphertext, private-decryption-key) -> plaintext
+
+        - no key exchange required
+
+* Digital Signatures
+
+    - sign(message, private-signing-key) -> signature
+    - verify(message, signature, public-verification-key) -> validity
+
+        - authentication
+        - non-repudiation
+        - non-tampering
+
+* Cryptographic Hash
+
+    - hash(message) -> digest
+
+        - hard to generate alternate message matching the digest
+        - hard to alter a message while matching the digest
+        - hard to find two messages with matching digests
+
+
+Electronic Currency
+-------------------
+
+* Required
+
+    - prevent people minting their own currency
+    - prevent duplicate spending of money
+    - prevent people stealing other people's money
+
+* Desired
+
+    - no central banking authority (there are disadvantages to this as well)
+    - anonymous transactions
+    
+* Applications
+
+    - normal purchasing using electronic money
+    - exchange of electronic and physical cash
+    - black / illegal markets!
+
+
+Building up a currency model
+----------------------------
+
+Step 1
+
+    * Alice sends Bob a signed public message transfering "money"
+
+        - proof of intent (authentication, non-repudiation)
+        - limited forgery protection
+        - no protection against duplication
+
+Step 2
+
+    * Associate each quantum of "money" with a unique serial ID
+    * Alice sends Bob a signed public message transfering "coin" 23826199
+
+        - duplicate transactions can be detected
+        - needs a central authority ("bank") to allocate serial IDs and
+            validate transactions
+
+Step 3
+    
+    * Distribute the "bank" role among all participants
+    * Create a shared public ledger of transactions
+
+        - transactions can be verified
+        - duplicate spending still possible by timed attacks
+
+    * Create a pool of verifiers who must collectively agree before
+        transactions become valid
+
+        - how many is enough?
+        - what if the attacker organises lots of verifiers?
+
+    * Make verification hard - "proof-of-work"
+
+        - computationally difficult, but reward verifiers
+        - it is difficult for attackers to bring on board enough CPU
+
+Bitcoins
+--------
+
+    * A coin is transferred to a new owner in a transaction:
+
+        - tx = new-owner-DS-verify-key + hash(verify-key + prev-hash) + sig(all, old-owner)
+        - chain of ownership
+        - anyone can verify the tx using payer's public DS verify key
+
+    * Collect a set of transactions into a "block"
+    
+

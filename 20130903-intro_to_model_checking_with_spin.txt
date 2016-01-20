@@ -1,0 +1,500 @@
+h3. The Problem
+
+Even simple concurrent systems are hard to verify.
+
+Unstructured reasoning is error-prone.
+Formal proofs can be created, but this is difficult and time-consuming.
+Testing can prove that a concurrent system has errors, but not that it is
+correct.
+
+For example, consider the following critical section code. Does it work?
+
+<insert lock.c>
+
+h3. Model Checking
+
+Model Checking is a technique for formally verifying concurrent software
+designs. Examples of problems that are suitable for model checking include:
+
+- communications protocols
+- synchronisation primitives or shared data structures
+- systems composed of concurrent communicating components
+
+Model checking takes a formally-defined model of a concurrent system and
+verifies it by enumerating all possible states.
+
+h3. Introduction to Spin
+
+Spin is an OSS model checker that will soon be available in SOLID. Verifying
+a concurrent system with Spin takes the following steps:
+
+1. Convert your software or design to a formally-defined model in the
+PROMELA language.
+
+2. Define the correctness checks that you want to be verified.
+
+3. Run Spin on your model, which generates a model checker in C. Note that
+Spin is actually a model checker *generator*.
+
+4. Compile and execute the generated model checker and evaluate the results.
+
+Let's go into these steps in more detail.
+
+h4. Defining your model in PROMELA
+
+Models are defined in PROMELA, a simple C-like language. PROMELA provides
+the following:
+
+h5. Processes represent the multiple threads of execution
+
+h5. Simple data types (bit, byte, short, int, bool) and variables (local and
+  global)
+
+h5. C-like expressions and statements
+
+h5. Selection statements (like switch statements with blocking if no
+matches):
+
+In the following example, a message will be printed depending on the value
+of the "flag" variable. If flag is neither of the given values, the if
+statement will block until this becomes true.
+
+{code}
+if
+:: (flag == 1) -> printf("page ready\n");
+:: (flag == 2) -> printf("cancelled!\n");
+fi
+{code}
+
+h5. Loop statements
+
+{code}
+do
+:: (flag == 1) -> printf("page ready\n");
+:: (flag == 2) -> printf("cancelled!\n"); break;
+od
+{code}
+
+The main difference with selections is that after a case is matched,
+execution restarts at the beginning of the loop again. Do loops can be
+exited with a goto or break statement.
+
+h5. Message channels for FIFO exchange of data between processes
+
+{code}
+chan fifo[10] of { mtype };
+
+proctype sender()
+{
+    [...]
+
+    fifo!CMD_RESET;                 /* send reset command */
+
+    [...]
+}
+
+proctype receiver()
+{
+    [...]
+
+    do
+    :: fifo?CMD_RESET -> reset = 1;     /* received reset command */
+    [...]
+    od
+
+    [...]
+}
+{code}
+
+h5. Correctness statements
+
+See below.
+
+h5. Non-determinism, where multiple execution paths are available
+
+Consider the following example:
+
+{code}
+if
+:: true -> printf("operation succeeded\n"); pages++;
+:: true -> printf("ERROR OCCURRED!\n"); error = 1;
+fi
+{code}
+
+Either of these cases could match. If we are doing a simulation in Spin, the
+interpreter will choose one of the two (randomly). If we are performing a
+verification run, then Spin will consider both cases.
+
+PROMELA is a pretty simple language to learn, but which still has the
+flexibility to define sophisticated model behaviour.
+
+The key to creating a realistic model
+that does not take forever to evaluate is to create a suitable abstraction
+of the system.  The model should only be as complex as is required to prove
+the system. For example, if an inter-process message queue has 20 slots, it
+is could be just as valid (and much quicker) to model a system with only 3
+slots.
+
+h4. Defining your correctness checks
+
+Firstly, if the model checker reaches a state where nothing can execute,
+it will report a timeout, which means you have a deadlock.
+
+It is also possible to perform liveness checking. An execution path can
+result actions being taken, but the model not progressing towards
+completion. Spin can identify such non-progressing paths.
+
+Spin can also check that each execution path results in the processes
+reaching some defined end state. Spin can identify paths where end states
+are not reached (of course many models are defined to not terminate).
+
+You can add assertions at places in your model where specific checks are
+performed. If the assertion fails, an error is reported.
+
+Finally, you can create global correctness statements that are evaluated for
+at every state in the execution paths. Such statements are defined in
+Linear Temporal Logic, which allows you to make claims involving clauses
+such as "eventually <some condition>", "always <some condition>", "<some
+condition> until <another condition>".
+
+h4. Run Spin on your model
+
+Before you create a verifier, you can get Spin to perform a simulation of
+your model.  Any non-determinism means you can get different output each
+time.
+
+To verify the model you must generate, compile and execute the checker:
+
+{code}
+$ spin -a mymodel.pml   # generates pan.c
+$ gcc -o pan pan.c
+{code}
+
+h4. Run the model checker and evaluate the results
+
+{code}
+$ ./pan
+pan:1: assertion violated (var==1) (at depth 21)
+[...output truncated]
+{code}
+
+There are various options to control the operation of the model checker.
+We'll see how this works in the examples below.
+
+h3. How does this work?
+
+If some abstract machine interpreted the model, the state of this machine at
+any time can be completely defined by the current execution location of each
+of the processes along with the local and global variables. All combined,
+this data is combined into a state vector.  The model also defines the
+transitions between the different state vectors. The result is a directed
+graph where each node represents a state value and the edges the allowable
+transitions between states.
+
+A model checker traverses all paths through this graph and checks various
+conditions at various points.
+
+Of course, generating a complete graph for even a simple model would be
+prohibitive. Spin performas a number of optimisations to make this search
+feasible:
+
+* It only generates the graph on the fly, and traverses it in a
+depth-first manner.
+* State vectors are hashed so that re-visited states are easily identified.
+* It uses partial order reduction to eliminate unnecessary sub-graphs.
+* It uses efficient compression algorithms to reduce working data.
+
+If Spin reaches a state where a correctness violation occurs, the path back
+to the top of the graph defines the counterexample which generated it.
+
+h3. Examples
+
+h4. Exclusive Lock Algorithm
+
+We visit the potential locking algorithm we saw earlier:
+
+{code}
+uint8_t x       = 0;
+uint8_t y       = 0;
+uint8_t z       = 0;
+
+void    do_something(void)
+{
+    uint8_t myid    = get_thread_id();
+
+    /* loop until we can acquire the lock */
+    for (;;)
+    {
+        x = myid;
+        if (y != 0 && y != myid)
+            continue;
+
+        z = myid;
+        if (x != myid)
+            continue;
+
+        y = myid;
+        if (z != myid)
+            continue;
+
+        break;
+    }
+
+    /* do stuff */
+
+    y = 0;  /* release lock */
+}
+{code}
+
+We can convert this to a PROMELA model fairly easily:
+
+{code}
+byte x  = 0;
+byte y  = 0;
+byte z  = 0;
+
+byte var;
+
+active[2] proctype do_something()
+{
+    byte myid = _pid+1;
+
+L1:
+    x = myid;
+
+    if
+    :: (y != 0 && y != myid) -> goto L1 /* try again */
+    :: else -> skip
+    fi;
+
+    z = myid;
+
+    if
+    :: (x != myid)  -> goto L1          /* try again */
+    :: else -> skip
+    fi;
+
+    y = myid;
+
+    if
+    :: (z != myid) -> goto L1           /* try again */
+    :: else -> skip
+    fi;
+
+    /* achieved lock */
+
+    var++;
+    assert(var == 1);
+    var--;
+
+    y = 0;  /* release lock */
+}
+{code}
+
+To verify mutual exclusion, we increment a global variable and assert that
+it has the correct value.  If the mutual exclusion is violated, then there
+will be a racy path though the model that will trigger the assert.
+
+Now, let us check the model:
+
+{code}
+$ spin -a lock.pml
+$ gcc -o pan pan.c
+$ ./pan
+hint: this search is more efficient if pan.c is compiled -DSAFETY
+pan:1: assertion violated (var==1) (at depth 21)
+pan: wrote lock.pml.trail
+
+(Spin Version 6.2.5 -- 3 May 2013)
+Warning: Search not completed
+        + Partial Order Reduction
+
+Full statespace search for:
+        never claim             - (none specified)
+        assertion violations    +
+        acceptance   cycles     - (not selected)
+        invalid end states      +
+
+State-vector 28 byte, depth reached 28, errors: 1
+       85 states, stored
+       30 states, matched
+      115 transitions (= stored+matched)
+        0 atomic steps
+hash conflicts:         0 (resolved)
+
+Stats on memory usage (in Megabytes):
+    0.005       equivalent memory usage for states (stored*(State-vector + overhead))
+    0.290       actual memory usage for states
+  128.000       memory used for hash table (-w24)
+    0.534       memory used for DFS stack (-m10000)
+  128.730       total actual memory usage
+
+pan: elapsed time 0.07 seconds
+pan: rate 1214.2857 states/second
+{code}
+
+Note that the assertion *is* violated. The execution trail to reach the
+violation can be examined using Spin:
+
+{code}
+$ spin -t -p -g lock.pml
+using statement merging
+  1:    proc  1 (do_something) lock.pml:12 (state 1)   [x = myid]
+                x = 2
+  2:    proc  1 (do_something) lock.pml:16 (state 4)   [else]
+  3:    proc  1 (do_something) lock.pml:16 (state 5)   [(1)]
+  4:    proc  1 (do_something) lock.pml:19 (state 8)   [z = myid]
+                z = 2
+  5:    proc  1 (do_something) lock.pml:23 (state 11)  [else]
+  6:    proc  1 (do_something) lock.pml:23 (state 12)  [(1)]
+  7:    proc  0 (do_something) lock.pml:12 (state 1)   [x = myid]
+                x = 1
+  8:    proc  0 (do_something) lock.pml:16 (state 4)   [else]
+  9:    proc  0 (do_something) lock.pml:16 (state 5)   [(1)]
+ 10:    proc  1 (do_something) lock.pml:26 (state 15)  [y = myid]
+                y = 2
+ 11:    proc  1 (do_something) lock.pml:30 (state 18)  [else]
+ 12:    proc  1 (do_something) lock.pml:30 (state 19)  [(1)]
+ 13:    proc  1 (do_something) lock.pml:35 (state 22)  [var = (var+1)]
+                var = 1
+ 14:    proc  1 (do_something) lock.pml:36 (state 23)  [assert((var==1))]
+ 15:    proc  0 (do_something) lock.pml:19 (state 8)   [z = myid]
+                z = 1
+ 16:    proc  0 (do_something) lock.pml:23 (state 11)  [else]
+ 17:    proc  0 (do_something) lock.pml:23 (state 12)  [(1)]
+ 18:    proc  0 (do_something) lock.pml:26 (state 15)  [y = myid]
+                y = 1
+ 19:    proc  0 (do_something) lock.pml:30 (state 18)  [else]
+ 20:    proc  0 (do_something) lock.pml:30 (state 19)  [(1)]
+ 21:    proc  0 (do_something) lock.pml:35 (state 22)  [var = (var+1)]
+                var = 2
+spin: lock.pml:36, Error: assertion violated
+spin: text of failed assertion: assert((var==1))
+ 22:    proc  0 (do_something) lock.pml:36 (state 23)  [assert((var==1))]
+spin: trail ends after 22 steps
+#processes: 2
+                x = 1
+                y = 1
+                z = 1
+                var = 2
+ 22:    proc  1 (do_something) lock.pml:37 (state 24)
+ 22:    proc  0 (do_something) lock.pml:37 (state 24)
+2 processes created
+{code}
+
+So, it doesn't look like this is a good method for mutual exclusion...
+
+h4. Producer/Consumer with cancel
+
+Consider the following model:
+
+{code}
+mtype = { CMD_PRINT_PAGE, CMD_SHUTDOWN }
+
+chan    queue       = [10] of { mtype };
+int     g_threads   = 0;
+int     g_cancel    = 0;
+
+active proctype controller()
+{
+    int     n   = 5;
+
+    g_threads++;
+
+    /* send some commands followed by a shutdown cmd */
+    do
+    :: (n > 0 && !g_cancel) -> queue!CMD_PRINT_PAGE; n--;
+    :: else -> queue!CMD_SHUTDOWN; break;
+    od;
+
+    g_threads--;
+
+    /* wait for all other threads to die */
+    do
+    :: g_threads == 0 -> break
+    od;
+
+    assert(g_threads == 0);
+}
+
+active proctype printer()
+{
+    g_threads++;
+
+    do
+    :: queue?CMD_PRINT_PAGE -> printf("printing page...\n"); break
+    :: queue?CMD_SHUTDOWN -> goto finished;
+    :: !g_cancel -> printf("cancel selected!\n"); g_cancel = 1;
+    :: true -> skip
+    od;
+
+finished:
+    g_threads--
+}
+{code}
+
+This is a simple producer/consumer, where the producer sends 5 "print"
+commands followed by a "shutdown" command. The consumer prints the messages
+as received. A complication is that the consumer can also detect an
+asynchronous cancel operation, which causes a flag to be set and the
+producer to send an early shutdown. The producer waits for the consumer to
+finish before it terminates.
+
+What could go wrong?  Let us look at the output:
+
+{code}
+$ ./pan
+hint: this search is more efficient if pan.c is compiled -DSAFETY
+pan:1: assertion violated (g_threads==0) (at depth 23)
+pan: wrote demo.pml.trail
+[...]
+using statement merging
+  1:    proc  0 (controller) demo.pml:11 (state 1)      [g_threads = (g_threads+1)]
+  2:    proc  0 (controller) demo.pml:15 (state 2)      [(((n>0)&&!(g_cancel)))]
+  3:    proc  0 (controller) demo.pml:15 (state 3)      [queue!CMD_PRINT_PAGE]
+  4:    proc  0 (controller) demo.pml:15 (state 4)      [n = (n-1)]
+  5:    proc  0 (controller) demo.pml:15 (state 2)      [(((n>0)&&!(g_cancel)))]
+  6:    proc  0 (controller) demo.pml:15 (state 3)      [queue!CMD_PRINT_PAGE]
+  7:    proc  0 (controller) demo.pml:15 (state 4)      [n = (n-1)]
+  8:    proc  0 (controller) demo.pml:15 (state 2)      [(((n>0)&&!(g_cancel)))]
+  9:    proc  0 (controller) demo.pml:15 (state 3)      [queue!CMD_PRINT_PAGE]
+ 10:    proc  0 (controller) demo.pml:15 (state 4)      [n = (n-1)]
+ 11:    proc  0 (controller) demo.pml:15 (state 2)      [(((n>0)&&!(g_cancel)))]
+ 12:    proc  0 (controller) demo.pml:15 (state 3)      [queue!CMD_PRINT_PAGE]
+ 13:    proc  0 (controller) demo.pml:15 (state 4)      [n = (n-1)]
+ 14:    proc  0 (controller) demo.pml:15 (state 2)      [(((n>0)&&!(g_cancel)))]
+ 15:    proc  0 (controller) demo.pml:15 (state 3)      [queue!CMD_PRINT_PAGE]
+ 16:    proc  0 (controller) demo.pml:15 (state 4)      [n = (n-1)]
+ 17:    proc  0 (controller) demo.pml:16 (state 5)      [else]
+ 18:    proc  0 (controller) demo.pml:16 (state 6)      [queue!CMD_SHUTDOWN]
+ 19:    proc  0 (controller) demo.pml:19 (state 11)     [g_threads = (g_threads-1)]
+ 20:    proc  0 (controller) demo.pml:23 (state 12)     [((g_threads==0))]
+ 21:    proc  1 (printer) demo.pml:31 (state 1) [g_threads = (g_threads+1)]
+ 22:    proc  1 (printer) demo.pml:34 (state 2) [queue?CMD_PRINT_PAGE]
+          printing page...
+ 23:    proc  1 (printer) demo.pml:34 (state 3) [printf('printing page...\\n')]
+spin: demo.pml:26, Error: assertion violated
+spin: text of failed assertion: assert((g_threads==0))
+ 24:    proc  0 (controller) demo.pml:26 (state 17)     [assert((g_threads==0))]
+spin: trail ends after 24 steps
+#processes: 2
+                queue 1 (queue): [CMD_PRINT_PAGE][CMD_PRINT_PAGE][CMD_PRINT_PAGE][CMD_PRINT_PAGE][CMD_SHUTDOWN]
+                g_threads = 1
+                g_cancel = 0
+ 24:    proc  1 (printer) demo.pml:41 (state 15)
+ 24:    proc  0 (controller) demo.pml:27 (state 18) <valid end state>
+2 processes created
+{code}
+
+OK, the problem here is that the producer has finished before the consumer has
+even executed its first statement...
+
+h3. More information
+
+h5. References
+
+* [http://spinroot.com/spin/Doc/p40-ben-ari.pdf|A Primer on Model Checking]
+* [http://spinroot.com/spin/Doc/ieee97.pdf|The Model Checker SPIN]
+* [http://spinroot.com/|Home of the Spin software]
+* [http://spinroot.com/spin/Man/|Spin tutorials]
+* [http://patterns.projects.cis.ksu.edu/documentation/patterns/ltl.shtml|Linear Temporal Logic patterns]
