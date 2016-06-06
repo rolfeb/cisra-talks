@@ -1,4 +1,7 @@
-h3. The Problem
+Verifying concurrent systems
+============================
+
+WARNING: this document is incomplete...
 
 Even simple concurrent systems are hard to verify.
 
@@ -11,22 +14,24 @@ For example, consider the following critical section code. Does it work?
 
 <insert lock.c>
 
-h3. Model Checking
+Model Checking
+~~~~~~~~~~~~~~
 
 Model Checking is a technique for formally verifying concurrent software
 designs. Examples of problems that are suitable for model checking include:
 
-- communications protocols
-- synchronisation primitives or shared data structures
-- systems composed of concurrent communicating components
+* communications protocols
+* synchronisation primitives or shared data structures
+* systems composed of concurrent communicating components
 
 Model checking takes a formally-defined model of a concurrent system and
 verifies it by enumerating all possible states.
 
-h3. Introduction to Spin
+Introduction to Spin
+~~~~~~~~~~~~~~~~~~~~
 
-Spin is an OSS model checker that will soon be available in SOLID. Verifying
-a concurrent system with Spin takes the following steps:
+Spin is an OSS model checker. Verifying a concurrent system with Spin takes
+the following steps:
 
 1. Convert your software or design to a formally-defined model in the
 PROMELA language.
@@ -34,54 +39,57 @@ PROMELA language.
 2. Define the correctness checks that you want to be verified.
 
 3. Run Spin on your model, which generates a model checker in C. Note that
-Spin is actually a model checker *generator*.
+Spin is actually a model checker _generator_.
 
 4. Compile and execute the generated model checker and evaluate the results.
 
 Let's go into these steps in more detail.
 
-h4. Defining your model in PROMELA
+Defining your model in PROMELA
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Models are defined in PROMELA, a simple C-like language. PROMELA provides
 the following:
 
-h5. Processes represent the multiple threads of execution
+* Processes represent the multiple threads of execution
 
-h5. Simple data types (bit, byte, short, int, bool) and variables (local and
+* Simple data types (bit, byte, short, int, bool) and variables (local and
   global)
 
-h5. C-like expressions and statements
+* C-like expressions and statements
 
-h5. Selection statements (like switch statements with blocking if no
+* Selection statements (like switch statements with blocking if no
 matches):
 
 In the following example, a message will be printed depending on the value
 of the "flag" variable. If flag is neither of the given values, the if
 statement will block until this becomes true.
 
-{code}
+----
 if
 :: (flag == 1) -> printf("page ready\n");
 :: (flag == 2) -> printf("cancelled!\n");
 fi
-{code}
+----
 
-h5. Loop statements
+Loop statements
+^^^^^^^^^^^^^^^
 
-{code}
+----
 do
 :: (flag == 1) -> printf("page ready\n");
 :: (flag == 2) -> printf("cancelled!\n"); break;
 od
-{code}
+----
 
 The main difference with selections is that after a case is matched,
 execution restarts at the beginning of the loop again. Do loops can be
 exited with a goto or break statement.
 
-h5. Message channels for FIFO exchange of data between processes
+Message channels for FIFO exchange of data between processes
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-{code}
+----
 chan fifo[10] of { mtype };
 
 proctype sender()
@@ -104,22 +112,24 @@ proctype receiver()
 
     [...]
 }
-{code}
+----
 
-h5. Correctness statements
+Correctness statements
+^^^^^^^^^^^^^^^^^^^^^^
 
 See below.
 
-h5. Non-determinism, where multiple execution paths are available
+Non-determinism, where multiple execution paths are available
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Consider the following example:
 
-{code}
+----
 if
 :: true -> printf("operation succeeded\n"); pages++;
 :: true -> printf("ERROR OCCURRED!\n"); error = 1;
 fi
-{code}
+----
 
 Either of these cases could match. If we are doing a simulation in Spin, the
 interpreter will choose one of the two (randomly). If we are performing a
@@ -135,7 +145,8 @@ the system. For example, if an inter-process message queue has 20 slots, it
 is could be just as valid (and much quicker) to model a system with only 3
 slots.
 
-h4. Defining your correctness checks
+Defining your correctness checks
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Firstly, if the model checker reaches a state where nothing can execute,
 it will report a timeout, which means you have a deadlock.
@@ -157,7 +168,8 @@ Linear Temporal Logic, which allows you to make claims involving clauses
 such as "eventually <some condition>", "always <some condition>", "<some
 condition> until <another condition>".
 
-h4. Run Spin on your model
+Run Spin on your model
+^^^^^^^^^^^^^^^^^^^^^^
 
 Before you create a verifier, you can get Spin to perform a simulation of
 your model.  Any non-determinism means you can get different output each
@@ -165,23 +177,25 @@ time.
 
 To verify the model you must generate, compile and execute the checker:
 
-{code}
+----
 $ spin -a mymodel.pml   # generates pan.c
 $ gcc -o pan pan.c
-{code}
+----
 
-h4. Run the model checker and evaluate the results
+Run the model checker and evaluate the results
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-{code}
+----
 $ ./pan
 pan:1: assertion violated (var==1) (at depth 21)
 [...output truncated]
-{code}
+----
 
 There are various options to control the operation of the model checker.
 We'll see how this works in the examples below.
 
-h3. How does this work?
+How does this work?
+~~~~~~~~~~~~~~~~~~~
 
 If some abstract machine interpreted the model, the state of this machine at
 any time can be completely defined by the current execution location of each
@@ -207,13 +221,15 @@ depth-first manner.
 If Spin reaches a state where a correctness violation occurs, the path back
 to the top of the graph defines the counterexample which generated it.
 
-h3. Examples
+Examples
+~~~~~~~~
 
-h4. Exclusive Lock Algorithm
+Exclusive Lock Algorithm
+^^^^^^^^^^^^^^^^^^^^^^^^
 
 We visit the potential locking algorithm we saw earlier:
 
-{code}
+----
 uint8_t x       = 0;
 uint8_t y       = 0;
 uint8_t z       = 0;
@@ -244,11 +260,11 @@ void    do_something(void)
 
     y = 0;  /* release lock */
 }
-{code}
+----
 
 We can convert this to a PROMELA model fairly easily:
 
-{code}
+----
 byte x  = 0;
 byte y  = 0;
 byte z  = 0;
@@ -289,7 +305,7 @@ L1:
 
     y = 0;  /* release lock */
 }
-{code}
+----
 
 To verify mutual exclusion, we increment a global variable and assert that
 it has the correct value.  If the mutual exclusion is violated, then there
@@ -297,7 +313,7 @@ will be a racy path though the model that will trigger the assert.
 
 Now, let us check the model:
 
-{code}
+----
 $ spin -a lock.pml
 $ gcc -o pan pan.c
 $ ./pan
@@ -331,12 +347,12 @@ Stats on memory usage (in Megabytes):
 
 pan: elapsed time 0.07 seconds
 pan: rate 1214.2857 states/second
-{code}
+----
 
 Note that the assertion *is* violated. The execution trail to reach the
 violation can be examined using Spin:
 
-{code}
+----
 $ spin -t -p -g lock.pml
 using statement merging
   1:    proc  1 (do_something) lock.pml:12 (state 1)   [x = myid]
@@ -380,15 +396,16 @@ spin: trail ends after 22 steps
  22:    proc  1 (do_something) lock.pml:37 (state 24)
  22:    proc  0 (do_something) lock.pml:37 (state 24)
 2 processes created
-{code}
+----
 
 So, it doesn't look like this is a good method for mutual exclusion...
 
-h4. Producer/Consumer with cancel
+Producer/Consumer with cancel
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Consider the following model:
 
-{code}
+----
 mtype = { CMD_PRINT_PAGE, CMD_SHUTDOWN }
 
 chan    queue       = [10] of { mtype };
@@ -431,7 +448,7 @@ active proctype printer()
 finished:
     g_threads--
 }
-{code}
+----
 
 This is a simple producer/consumer, where the producer sends 5 "print"
 commands followed by a "shutdown" command. The consumer prints the messages
@@ -442,7 +459,7 @@ finish before it terminates.
 
 What could go wrong?  Let us look at the output:
 
-{code}
+----
 $ ./pan
 hint: this search is more efficient if pan.c is compiled -DSAFETY
 pan:1: assertion violated (g_threads==0) (at depth 23)
@@ -484,17 +501,16 @@ spin: trail ends after 24 steps
  24:    proc  1 (printer) demo.pml:41 (state 15)
  24:    proc  0 (controller) demo.pml:27 (state 18) <valid end state>
 2 processes created
-{code}
+----
 
 OK, the problem here is that the producer has finished before the consumer has
 even executed its first statement...
 
-h3. More information
+More information
+~~~~~~~~~~~~~~~~
 
-h5. References
-
-* [http://spinroot.com/spin/Doc/p40-ben-ari.pdf|A Primer on Model Checking]
-* [http://spinroot.com/spin/Doc/ieee97.pdf|The Model Checker SPIN]
-* [http://spinroot.com/|Home of the Spin software]
-* [http://spinroot.com/spin/Man/|Spin tutorials]
-* [http://patterns.projects.cis.ksu.edu/documentation/patterns/ltl.shtml|Linear Temporal Logic patterns]
+* link:http://spinroot.com/spin/Doc/p40-ben-ari.pdf[A Primer on Model Checking]
+* link:http://spinroot.com/spin/Doc/ieee97.pdf[The Model Checker SPIN]
+* link:http://spinroot.com/[Home of the Spin software]
+* link:http://spinroot.com/spin/Man/[Spin tutorials]
+* link:http://patterns.projects.cis.ksu.edu/documentation/patterns/ltl.shtml[Linear Temporal Logic patterns]
